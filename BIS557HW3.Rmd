@@ -1,0 +1,174 @@
+---
+title: "BIS557HW3"
+author: "ROSE HU"
+date: "11/22/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r comment="", echo=FALSE}
+cat("```{r}\n# R\nlibrary(reticulate)\nuse_virtualenv(\"./p4rp\")\n```")
+```
+
+
+```{r echo = FALSE}
+library(reticulate)
+use_python("C:/Program Files (x86)/Microsoft Visual Studio/Shared/Python37_64", required = TRUE)
+use_virtualenv("./p4rp")
+```
+
+import libiraries and test files
+```{python echo=TRUE}
+from numpy import genfromtxt
+import numpy as np
+import random
+from sklearn.model_selection import KFold
+testdata_x = genfromtxt(r"C:\Users\Seonghoon Noh\Desktop\x.csv", delimiter=',')
+testdata_y = genfromtxt(r"C:\Users\Seonghoon Noh\Desktop\y.csv", delimiter=',')
+testdata_y = testdata_y.reshape(-1,1)
+b= np.zeros((testdata_x.shape[1],1))
+w = np.empty([len(testdata_y),1])
+w.fill(1/len(testdata_y))
+```
+
+
+1.Ridge regression implementation.
+```{python echo = TRUE}
+def lm_ridge(x, y, lambda_vals):
+        u, s, vh = np.linalg.svd(x, full_matrices=False)
+        s = s.reshape(-1,1)
+        k = len(lambda_vals)
+        x_size = x.shape
+        ridge_beta = np.empty((k, x_size[1]))
+
+        for i in range(0, k):
+                D = np.diagflat(s/((s**2) + lambda_vals[i]))
+                ridge_beta[i,:] = (np.matmul(np.matmul(np.matmul(vh, D), np.transpose(u)), y)).reshape(1,-1)
+        return ridge_beta
+```
+
+
+2.Use cross validation to find the optimal lambda
+```{python echo=TRUE}
+def folds(x, k):
+        kf = KFold(n_splits = k, shuffle=True)
+        kf.get_n_splits(x)
+        X_train = []
+        X_test = []
+        for train_index, test_index in kf.split(x):
+                X_train.append(train_index)
+                X_test.append(test_index)
+        return X_train, X_test
+
+def mse(y, y_hat):
+        return np.mean((y - y_hat)**2)
+
+def cross_validation(x, y, lambda_vals = [-1, -0.5, -0.1, -0.01, 0.01, 0.1, 0.5, 1, 2, 5], k = 10):
+        train, test = folds(x, k)
+        diff = [[] for i in range(k)]
+
+        for i in range(0, len(train)):
+                betas = lm_ridge(x[train[i]], y[train[i]], lambda_vals)
+
+                for beta in betas:
+                        y_hat = np.dot(x[test[i]], beta.reshape(-1,1))
+                        diff[i].append(mse(y[test[i]], y_hat))
+
+        means = np.mean(diff,axis=1)
+        return lambda_vals[np.argmin(means)]
+```
+
+
+3.LASSO regression
+```{python echo=TRUE}
+def soft_thresh(a,b):
+        if np.abs(a) <= b:
+                a = 0
+        elif a > 0:
+                a -= b
+        elif a < 0:
+                a += b
+        return a
+
+def update_beta(x, y, lambda_val, alpha, b, w):
+        wx = x*w
+        wx2 = (x**2)*w
+        xb = np.matmul(x,b)
+
+        for i in range(len(b)):
+                xb -= np.multiply(x[:,i].reshape(-1,1), b[i])
+                temp = soft_thresh(np.sum(wx[:,i]*(y-xb).reshape(-1)), lambda_val*alpha)
+                b[i] = temp/(np.sum(wx2[:,i]) +lambda_val*(1-alpha))
+                xb = xb + np.outer(x[:,i], b[i])
+
+        return b
+
+def coordinate_descent(x,y,lambda_val, alpha = 1):
+        b= np.zeros((x.shape[1],1))
+        w = np.empty([len(y),1])
+        w.fill(1/len(y))
+        num_of_iter = 50
+        for i in range(num_of_iter):
+                b_prev = b
+                b = update_beta(x, y, lambda_val, alpha, b_prev, w)
+                if np.all(abs(b-b_prev) < 1e-10):
+                        break
+
+        return b
+```
+
+```{python echo=TRUE}
+soft_thresh(5,2)
+update_beta(testdata_x, testdata_y, 0.5, 1, b, w)
+coordinate_descent(testdata_x,testdata_y,0.5)
+```
+```{r}
+library(casl)
+testdata_x<-data.matrix(read.csv("C:/Users/Seonghoon Noh/Desktop/x.csv", header=FALSE))
+testdata_y<-data.matrix(read.csv("C:/Users/Seonghoon Noh/Desktop/y.csv", header=FALSE))
+casl_util_soft_thresh(5,2)
+casl_lenet_update_beta(X=testdata_x,y=testdata_y,lambda=0.5, alpha = 1, b=matrix(0, nrow=ncol(testdata_x), ncol=1),W=rep(1, length(testdata_y))/length(testdata_y))
+casl_lenet(X=testdata_x,y=testdata_y,lambda=0.5, alpha = 1, b=matrix(0, nrow=ncol(testdata_x), ncol=1),tol = 1e-5, maxit=50L, W=rep(1, length(testdata_y))/length(testdata_y))
+```
+The results of my implementation and the results of casl_lenet are very close.
+
+
+4.Iterator 
+```{python echo=TRUE}
+def text_to_vec(x):
+  return np.array([float(r) for r in x.strip().replace(" ", "").split(",")])
+  
+def FileIter(file_name, chunk_size = 10, skip = 1):
+  with open(file_name) as f:
+    if skip > 0:
+      [f.readline() for s in range(skip)]
+    eof = False
+    while not eof:
+      lines = [f.readline() for s in range(chunk_size)]
+      ret = np.array([text_to_vec(x) for x in lines if len(x) > 0])
+      current_pos = f.tell()
+      if f.readline() == '':
+        eof = True
+      f.seek(current_pos)
+      yield ret
+
+
+def ols(x_file, y_file, chunksize = 10):
+        i = 0
+        for ychunk, xchunk in zip(FileIter(y_file), FileIter(x_file)):
+                if i == 0:
+                        xtx_sum = np.matmul(np.transpose(xchunk), xchunk)
+                        xty_sum = np.matmul(np.transpose(xchunk), ychunk)
+                else:
+                        xtx_sum = np.add(xtx_sum, np.matmul(np.transpose(xchunk), xchunk))
+                        xty_sum = np.add(xty_sum, np.matmul(np.transpose(xchunk), ychunk))
+                i+=1
+                
+        b = np.linalg.solve(xtx_sum, xty_sum)
+        return b
+```
+
